@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"time"
@@ -16,19 +15,19 @@ var upgrader = websocket.Upgrader{
 }
 
 type hub struct {
-	clients map[*client]bool
-	borad   chan []byte
-	join    chan *client
-	leave   chan *client
+	clients   map[*client]bool
+	boradcast chan []byte
+	join      chan *client
+	leave     chan *client
 }
 
 //回傳指標、整個app共用
 func New() *hub {
 	return &hub{
-		clients: make(map[*client]bool),
-		borad:   make(chan []byte),
-		join:    make(chan *client),
-		leave:   make(chan *client),
+		clients:   make(map[*client]bool),
+		boradcast: make(chan []byte),
+		join:      make(chan *client),
+		leave:     make(chan *client),
 	}
 }
 
@@ -43,16 +42,16 @@ func (h *hub) run() {
 			fmt.Println("leave")
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
-				close(client.send)
+				//close(client.send)
 			}
-		case msg := <-h.borad:
+		case msg := <-h.boradcast:
 			fmt.Println("message = ", msg, ", count = ", len(h.clients))
 			for client := range h.clients {
 				select {
 				case client.send <- msg:
 				default:
 					fmt.Println("hub clients run default")
-					//delete(h.clients, client)
+					delete(h.clients, client)
 					//close(client.send)
 				}
 			}
@@ -68,12 +67,14 @@ type client struct {
 	send chan []byte
 }
 
+// method of client for select read message from webscoket and write to hub borad channel
 func (c *client) read() {
 	defer func() {
 		c.conn.Close()
 		c.hub.leave <- c
 	}()
 	fmt.Println("client start read")
+	//不設定會中斷連結
 	c.conn.SetReadLimit(512)
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)); return nil })
@@ -88,16 +89,22 @@ func (c *client) read() {
 			break
 		}
 		fmt.Println("write to borad = ", string(message))
-		c.hub.borad <- message
+		c.hub.boradcast <- message
+
 	}
 }
 
+// method of client for select write message to webscoket
 func (c *client) write() {
 	ticker := time.NewTicker((60 * time.Second * 9) / 10)
 	fmt.Println("client start write")
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
 	for {
 		select {
-		case msg := <-c.hub.borad:
+		case msg := <-c.send:
 			fmt.Println("write=", string(msg))
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
@@ -119,27 +126,25 @@ func main() {
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	h := New()
 	go h.run()
+	fmt.Println("start run")
+
+	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+		http.ServeFile(rw, r, "index.html")
+	})
+
 	http.HandleFunc("/ws", func(rw http.ResponseWriter, r *http.Request) {
 		fmt.Println("ws start")
 		conn, err := upgrader.Upgrade(rw, r, nil)
 		if err != nil {
-			fmt.Println("error")
 			log.Fatal(err)
 		}
-		client := &client{conn: conn, hub: h}
-		client.hub.join <- client
-		go client.read()
-		go client.write()
+		c := &client{conn: conn, hub: h, send: make(chan []byte)}
+		c.hub.join <- c
+		go c.write()
+		go c.read()
 
 	})
 
-	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
-		temp, err := template.ParseFiles("./index.html")
-		if err != nil {
-			log.Fatal(err)
-		}
-		temp.Execute(rw, nil)
-	})
 	fmt.Println("start listen 5050")
 	if err := http.ListenAndServe(":5050", nil); err != nil {
 		log.Fatal(err)

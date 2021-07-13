@@ -7,9 +7,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
 </head>
-<form id="fmt1">
+<form id="fmt1">    
     <input type="text" id="message" autofocus>
     <input type="submit" id="btn" value="send" />
+    <ul id="chatList"></ul>
 </form>
 
 <body>
@@ -25,12 +26,15 @@
         var ws = new WebSocket("ws://localhost:5050/ws")
         ws.onopen = () => {
             console.log("open ws");
-            ws.send("hi");
+            ws.send("connect");
         }
         ws.onclose = () => {
             ws.send("bye");
         }
         ws.onmessage = (evt) => {
+            var item = document.createElement("li");
+            item.innerText = evt.data;
+            document.querySelector("#chatList").appendChild(item);
             console.log(evt.data);
         }
 
