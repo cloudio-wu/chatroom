@@ -14,6 +14,36 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+func setRouter(h *hub) {
+	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+		http.ServeFile(rw, r, "index.html")
+	})
+
+	http.HandleFunc("/ws", func(rw http.ResponseWriter, r *http.Request) {
+		fmt.Println("ws start")
+		conn, err := upgrader.Upgrade(rw, r, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		c := &client{conn: conn, hub: h, send: make(chan []byte)}
+		c.hub.join <- c
+		go c.write()
+		go c.read()
+	})
+}
+
+func main() {
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	h := New()
+	go h.run()
+	fmt.Println("start run")
+	setRouter(h)
+	fmt.Println("start listen 5050")
+	if err := http.ListenAndServe(":5050", nil); err != nil {
+		log.Fatal(err)
+	}
+}
+
 type hub struct {
 	clients   map[*client]bool
 	boradcast chan []byte
@@ -42,21 +72,20 @@ func (h *hub) run() {
 			fmt.Println("leave")
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
-				//close(client.send)
+				close(client.send)
 			}
 		case msg := <-h.boradcast:
-			fmt.Println("message = ", msg, ", count = ", len(h.clients))
+			fmt.Println("message = ", string(msg), ", count = ", len(h.clients))
 			for client := range h.clients {
 				select {
 				case client.send <- msg:
 				default:
 					fmt.Println("hub clients run default")
 					delete(h.clients, client)
-					//close(client.send)
+					close(client.send)
 				}
 			}
 		default:
-
 		}
 	}
 }
@@ -90,7 +119,6 @@ func (c *client) read() {
 		}
 		fmt.Println("write to borad = ", string(message))
 		c.hub.boradcast <- message
-
 	}
 }
 
@@ -120,34 +148,4 @@ func (c *client) write() {
 			}
 		}
 	}
-}
-
-func main() {
-	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
-	h := New()
-	go h.run()
-	fmt.Println("start run")
-
-	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
-		http.ServeFile(rw, r, "index.html")
-	})
-
-	http.HandleFunc("/ws", func(rw http.ResponseWriter, r *http.Request) {
-		fmt.Println("ws start")
-		conn, err := upgrader.Upgrade(rw, r, nil)
-		if err != nil {
-			log.Fatal(err)
-		}
-		c := &client{conn: conn, hub: h, send: make(chan []byte)}
-		c.hub.join <- c
-		go c.write()
-		go c.read()
-
-	})
-
-	fmt.Println("start listen 5050")
-	if err := http.ListenAndServe(":5050", nil); err != nil {
-		log.Fatal(err)
-	}
-
 }

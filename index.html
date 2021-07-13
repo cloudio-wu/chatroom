@@ -18,8 +18,8 @@
     <script>
         (() => {
             document.querySelector("#fmt1").onsubmit = () => {
-
                 ws.send(document.querySelector("#message").value);
+                document.querySelector("#message").value = "";
                 return false;
             }
         })()
