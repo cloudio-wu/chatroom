@@ -1,12 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
 </head>
+
 <body>
     {{.Title}}
+    <form action="">
+        <input type="text" id="message">
+        <ul id="chat"></ul>
+        <button type="submit">send</button>
+    </form>
 </body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/1.7.3/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script>
+
+
+    var s2 = io('ws://localhost:7777');
+
+    s2.on("connect", () => {
+        // either with send()
+        alert('connect');
+        s2.send("Hello!");
+
+        // or with emit() and custom event names
+        s2.emit("salutations", "Hello!", { "mr": "john" }, Uint8Array.from([1, 2, 3, 4]));
+    });
+
+    s2.on('reply', (msg) => {
+        alert(msg);
+    });
+
+    $('form').on('submit', () => {
+        s2.emit('msg', (data) => {
+            $('#chat').append($('li').text('call back : ' + data));
+        });
+
+        s2.emit('notice', $('#message').val());
+        $('#message').val('')
+        return false;
+    });
+
+</script>
+
 </html>
