@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var upgrader = websocket.Upgrader{
@@ -14,34 +18,73 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-func setRouter(h *hub) {
-	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
-		http.ServeFile(rw, r, "index.html")
+func generateToken(encodString string) string {
+	hash, err := bcrypt.GenerateFromPassword([]byte(encodString), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Hash to store:", string(hash))
+
+	hasher := md5.New()
+	hasher.Write(hash)
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func setRouter(router *gin.Engine, h *hub) {
+	router.GET("/", func(ctx *gin.Context) {
+		ctx.HTML(http.StatusOK, "index.html", nil)
 	})
 
-	http.HandleFunc("/ws", func(rw http.ResponseWriter, r *http.Request) {
+	router.GET("/ws", func(c *gin.Context) {
 		fmt.Println("ws start")
-		conn, err := upgrader.Upgrade(rw, r, nil)
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			log.Fatal(err)
 		}
-		c := &client{conn: conn, hub: h, send: make(chan []byte)}
-		c.hub.join <- c
-		go c.write()
-		go c.read()
+		cl := &client{conn: conn, hub: h, send: make(chan []byte)}
+		cl.hub.join <- cl
+		go cl.write()
+		go cl.read()
+	})
+
+	router.GET("/login", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "login.html", nil)
+	})
+
+	router.POST("/login", func(c *gin.Context) {
+		token := generateToken(c.Request.FormValue("username"))
+		fmt.Println(token)
+		c.Writer.Header().Set("auth", token)
+		//username := c.Request.FormValue("username")
+		//c.Writer.Write([]byte(fmt.Sprintf("hi %s", username)))
+		//c.HTML(302, "home.html", nil)
+		c.JSON(302, "ok")
 	})
 }
 
+const port int = 5050
+
+type IndexData struct {
+	Title   string
+	Content string
+}
+
 func main() {
+	router := gin.Default()
+	router.LoadHTMLGlob("template/*")
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	h := New()
 	go h.run()
 	fmt.Println("start run")
-	setRouter(h)
-	fmt.Println("start listen 5050")
-	if err := http.ListenAndServe(":5050", nil); err != nil {
-		log.Fatal(err)
-	}
+
+	setRouter(router, h)
+	fmt.Println(fmt.Sprintf(":%d", port))
+	/*
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
+			log.Fatal(err)
+		}
+	*/
+	log.Fatal(router.Run(fmt.Sprintf(":%d", port)))
 }
 
 type hub struct {
